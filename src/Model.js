@@ -274,7 +274,7 @@ const Model = class Model {
      *
      * @param  {Object} userProps - the new {@link Model}'s properties.
      * @return {Model} a new {@link Model} instance.
-     */
+     
     static create(userProps) {
         if (typeof this._session === "undefined") {
             throw new Error(
@@ -313,7 +313,7 @@ const Model = class Model {
                      * from the target models when refreshing the M2M relations.
                      * If the relationship does have an accessor (`as`) field then we do want to keep this
                      * original value in the props to expose the raw list of IDs from the instance.
-                     */
+                     
                     delete props[key];
                 }
             }
@@ -345,6 +345,89 @@ const Model = class Model {
         const instance = new ThisModel(newEntry);
         instance._refreshMany2Many(m2mRelations); // eslint-disable-line no-underscore-dangle
         return instance;
+    }*/
+    
+    static createOneRecord(item) {
+        if (typeof this._session === 'undefined') {
+            throw new Error([
+                `Tried to create a ${this.modelName} model instance without a session. `,
+                'Create a session using `session = orm.session()` and call ',
+                `\`session["${this.modelName}"].create\` instead.`,
+            ].join(''));
+        }
+        const props = { ...item };
+
+        const m2mRelations = {};
+
+        const declaredFieldNames = Object.keys(this.fields);
+        const declaredVirtualFieldNames = Object.keys(this.virtualFields);
+
+        declaredFieldNames.forEach((key) => {
+            const field = this.fields[key];
+            const valuePassed = item.hasOwnProperty(key);
+            if (!(field instanceof ManyToMany)) {
+                if (valuePassed) {
+                    const value = item[key];
+                    props[key] = normalizeEntity(value);
+                } else if (field.getDefault) {
+                    props[key] = field.getDefault();
+                }
+            } else if (valuePassed) {
+                // If a value is supplied for a ManyToMany field,
+                // discard them from props and save for later processing.
+                m2mRelations[key] = item[key];
+                delete props[key];
+            }
+        });
+
+        // add backward many-many if required
+        declaredVirtualFieldNames.forEach((key) => {
+            if (!m2mRelations.hasOwnProperty(key)) {
+                const field = this.virtualFields[key];
+                if (item.hasOwnProperty(key) && field instanceof ManyToMany) {
+                    // If a value is supplied for a ManyToMany field,
+                    // discard them from props and save for later processing.
+                    m2mRelations[key] = item[key];
+                    delete props[key];
+                }
+            }
+        });
+
+        const newEntry = this.session.applyUpdate({
+            action: CREATE,
+            table: this.modelName,
+            payload: props,
+        });
+
+        const ThisModel = this;
+        const instance = new ThisModel(newEntry);
+        instance._refreshMany2Many(m2mRelations); // eslint-disable-line no-underscore-dangle
+        return instance;
+    }
+
+/**
+     * Creates a new record in the database, instantiates a {@link Model} and returns it.
+     *
+     * If you pass values for many-to-many fields, instances are created on the through
+     * model as well.
+     *
+     * @param  {props} userProps - the new {@link Model}'s properties.
+     * @return {Model} a new {@link Model} instance.
+     */
+    static create(userProps) {
+        let results;
+
+        if (Array.isArray(userProps)) {
+            console.log('is batch update');
+            results = [];
+            userProps.forEach((item) => {
+                const instance = this.createOneRecord(item);
+                results.push(instance);
+            });
+        } else {
+            results = this.createOneRecord(userProps);
+        }
+        return results;
     }
 
     /**
